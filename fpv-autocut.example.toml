@@ -1,0 +1,42 @@
+# Copy to my.toml, change what you need, run with --config my.toml.
+# Every key and its default is in fpv_autocut/config.py.
+
+shorts_count = 3
+
+[weights]          # contribution of each signal to the highlight score
+gyro = 0.40        # rotation rate
+flip = 0.25        # flips / rolls / loops
+motion = 0.30      # image change: speed and proximity
+audio = 0.05       # throttle punches
+
+[detect]
+flip_min_deg = 180       # rotation within 1.5 s where the flip bonus starts
+flip_full_deg = 360      # full flip bonus
+idle_gyro_dps = 20       # below this + still image = on the ground
+idle_motion_abs = 1.0    # mean frame difference (0-255) counted as "still"
+
+[reel]
+target = 180       # seconds
+min_len = 1.5
+max_len = 6.0
+order = "chrono"   # chrono | score | hook (best first)
+
+[long]
+target = 720
+
+[short]
+target = 30
+max_len = 4.0
+
+[horizontal]
+width = 1920
+height = 1080
+fps = 60
+vcodec = "libx264"   # h264_nvenc (NVIDIA), h264_qsv (Intel), h264_amf (AMD), h264_mf (Windows ARM64)
+crf = 18
+
+[vertical]
+width = 1080
+height = 1920
+fps = 60
+source_audio_under_music = 0.0   # e.g. 0.15 to keep quiet motor sound under the music

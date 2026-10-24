@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+
+# outputs and footage
+autocut_out/
+edit/
+demo/
+synthetic/
+*.mp4
+*.mov
+*.mkv
+*.gcsv
+*.mp3
+*.wav
+*.npz
+*.fcpxml
+
+# local config
+my.toml
+.env
