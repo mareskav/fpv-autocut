@@ -12,6 +12,7 @@ import json
 import math
 import os
 import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -56,20 +57,24 @@ def visual_signals(clip: Clip, cfg: Config, hwaccel: str | None = None) -> dict[
     frame_size = w * h
     motion, sharp, luma = [], [], []
     prev = None
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-        assert proc.stdout is not None
-        while True:
-            buf = proc.stdout.read(frame_size)
-            if len(buf) < frame_size:
-                break
-            f = np.frombuffer(buf, dtype=np.uint8).reshape(h, w).astype(np.float32)
-            luma.append(float(f.mean()))
-            lap = 4 * f[1:-1, 1:-1] - f[:-2, 1:-1] - f[2:, 1:-1] - f[1:-1, :-2] - f[1:-1, 2:]
-            sharp.append(float(lap.var()))
-            motion.append(float(np.abs(f - prev).mean()) if prev is not None else np.nan)
-            prev = f
-        err = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
-        proc.wait()
+    # stderr goes to a file, not a pipe: a damaged video can print more than a pipe buffer holds,
+    # which would block ffmpeg while we are still waiting on stdout.
+    with tempfile.TemporaryFile() as errf:
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf) as proc:
+            assert proc.stdout is not None
+            while True:
+                buf = proc.stdout.read(frame_size)
+                if len(buf) < frame_size:
+                    break
+                f = np.frombuffer(buf, dtype=np.uint8).reshape(h, w).astype(np.float32)
+                luma.append(float(f.mean()))
+                lap = 4 * f[1:-1, 1:-1] - f[:-2, 1:-1] - f[2:, 1:-1] - f[1:-1, :-2] - f[1:-1, 2:]
+                sharp.append(float(lap.var()))
+                motion.append(float(np.abs(f - prev).mean()) if prev is not None else np.nan)
+                prev = f
+            proc.wait()
+        errf.seek(0)
+        err = errf.read().decode(errors="replace")
     if proc.returncode != 0 and not luma:
         raise RuntimeError(f"ffmpeg failed on {clip.path}:\n{err.strip()[-2000:]}")
 
@@ -82,25 +87,36 @@ def visual_signals(clip: Clip, cfg: Config, hwaccel: str | None = None) -> dict[
     }
 
 
-def audio_signal(clip: Clip) -> np.ndarray:
+def audio_signal(clip: Clip, cfg: Config) -> np.ndarray:
+    """Loudness (dB RMS) per bin. Streamed in chunks, so an hour-long clip needs no hour of PCM in RAM."""
     n_bins = max(1, math.ceil(clip.duration / BIN))
     if not clip.has_audio:
         return np.full(n_bins, np.nan)
-    sr = 8000
+    sr = int(cfg.detect.audio_sr)
+    hop = int(sr * BIN)
     cmd = ["ffmpeg", "-v", "error", "-nostdin", "-i", clip.path, "-vn", "-ac", "1", "-ar", str(sr),
            "-f", "f32le", "-"]
-    res = subprocess.run(cmd, capture_output=True)
-    pcm = np.frombuffer(res.stdout, dtype=np.float32)
-    if pcm.size == 0:
-        return np.full(n_bins, np.nan)
-    hop = int(sr * BIN)
-    usable = (pcm.size // hop) * hop
-    frames = pcm[:usable].reshape(-1, hop)
-    rms = np.sqrt((frames.astype(np.float64) ** 2).mean(axis=1) + 1e-12)
-    db = 20 * np.log10(rms)
+    db: list[float] = []
+    with tempfile.TemporaryFile() as errf, subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf) as proc:
+        assert proc.stdout is not None
+        chunk_bytes = hop * 4 * 64   # 64 bins per read
+        rest = b""
+        while True:
+            buf = proc.stdout.read(chunk_bytes)
+            if not buf:
+                break
+            rest += buf
+            usable = (len(rest) // (hop * 4)) * hop * 4
+            if usable:
+                frames = np.frombuffer(rest[:usable], dtype=np.float32).reshape(-1, hop)
+                rms = np.sqrt((frames.astype(np.float64) ** 2).mean(axis=1) + 1e-12)
+                db.extend(20 * np.log10(rms))
+                rest = rest[usable:]
+        proc.wait()
     out = np.full(n_bins, np.nan)
-    m = min(n_bins, len(db))
-    out[:m] = db[:m]
+    if db:  # a failed or empty decode just leaves NaN: loudness is only a minor score input
+        m = min(n_bins, len(db))
+        out[:m] = np.asarray(db[:m])
     return out
 
 
@@ -110,7 +126,7 @@ def _cache_key(clip: Clip, cfg: Config, gyro_offset: float) -> str:
         parts += [clip.gyro_path, str(os.path.getmtime(clip.gyro_path))]
     d = cfg.detect
     parts += [CACHE_VERSION]
-    parts += [str(x) for x in (d.analysis_fps, d.analysis_width, d.gyro_lowpass_hz, d.flip_window_s, gyro_offset, BIN)]
+    parts += [str(x) for x in (d.analysis_fps, d.analysis_width, d.audio_sr, d.gyro_lowpass_hz, d.flip_window_s, gyro_offset, BIN)]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
@@ -150,7 +166,7 @@ def analyze_clip(clip: Clip, cfg: Config, cache_dir: Path, *, gyro_offset: float
 
     log(f"  analysing {Path(clip.path).name} ({clip.duration:.0f} s)")
     sig = visual_signals(clip, cfg, hwaccel=hwaccel)
-    sig["audio_db"] = audio_signal(clip)
+    sig["audio_db"] = audio_signal(clip, cfg)
     n_bins = len(sig["motion"])
     if clip.gyro_path:
         try:

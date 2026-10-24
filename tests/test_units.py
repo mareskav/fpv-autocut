@@ -123,3 +123,45 @@ def test_config_override_and_unknown_key(tmp_path: Path):
     p.write_text("[reel]\ntargett = 90\n")
     with pytest.raises(ValueError):
         load_config(p)
+
+
+def test_config_rejects_bad_order(tmp_path: Path):
+    p = tmp_path / "c.toml"
+    p.write_text('[reel]\norder = "random"\n')
+    with pytest.raises(ValueError, match="reel.order"):
+        load_config(p)
+
+
+def test_snap_never_grows_into_neighbour():
+    beats = np.arange(0, 60, 60 / 128)
+    # Two segments of one clip with a 0.4 s gap: growing the first to a beat must stop at the second.
+    a = Segment(0, 10.0, 12.6, 0.9, 0.9, 11)
+    b = Segment(0, 13.0, 16.0, 0.8, 0.8, 14)
+    out = snap_to_beats([a, b], beats, [_clip()], min_len=1.5)
+    assert out[0].end <= out[1].start + 1e-9
+    assert out[0].start >= 0 and out[1].end <= DURATION
+
+
+def test_snap_skips_when_no_beat_fits_free_space():
+    beats = np.arange(0, 60, 2.0)           # beats too far apart to fit in the 0.2 s gap
+    a = Segment(0, 10.0, 11.9, 0.9, 0.9, 11)
+    b = Segment(0, 12.1, 14.0, 0.8, 0.8, 13)
+    out = snap_to_beats([a, b], beats, [_clip()], min_len=1.5)
+    assert out[0].end <= out[1].start + 1e-9
+
+
+def test_merge_close_joins_near_segments_only():
+    from fpv_autocut.planning import _merge_close
+    segs = [Segment(0, 0, 2, 0.5, 0.6, 1), Segment(0, 3, 5, 0.9, 0.95, 4), Segment(0, 20, 22, 0.7, 0.7, 21),
+            Segment(1, 0, 2, 0.4, 0.4, 1)]
+    out = _merge_close(segs, gap=1.5)
+    assert [(s.clip, s.start, s.end) for s in out] == [(0, 0, 5), (0, 20, 22), (1, 0, 2)]
+    assert out[0].peak == 0.95 and out[0].peak_t == 4
+    assert abs(out[0].score - (0.5 * 2 + 0.9 * 2) / 4) < 1e-9
+
+
+def test_resolve_overlaps_splits_overlap_and_drops_slivers():
+    from fpv_autocut.planning import _resolve_overlaps
+    segs = [Segment(0, 0, 5, 1, 1, 2), Segment(0, 4, 8, 1, 1, 6), Segment(0, 7.9, 8.0, 1, 1, 7.95)]
+    out = _resolve_overlaps(segs)
+    assert [(s.start, s.end) for s in out] == [(0, 4.5), (4.5, 7.95)]   # the 0.05 s sliver is dropped

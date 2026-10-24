@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import subprocess
 from pathlib import Path
 
 from . import BIN, __version__
@@ -21,7 +22,6 @@ from .render import contact_sheet, render_plan_output
 from .scoring import score_session
 from .signals import analyze_all, dump_json, write_timeline_csv
 
-GEMINI_MAX_CANDIDATES = 60  # cost cap: only the strongest moments are sent
 
 
 def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | None = None,
@@ -43,7 +43,7 @@ def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | No
 
     if use_gemini:
         from .gemini import apply_ratings, rate_segments
-        top = sorted(reel_c, key=lambda s: -s.score)[:GEMINI_MAX_CANDIDATES]
+        top = sorted(reel_c, key=lambda s: -s.score)[:cfg.gemini_max_candidates]
         ratings = rate_segments(top, clips, out_dir, cfg.gemini_model, log=log)
         for group in (reel_c, long_c, short_c):
             apply_ratings(group, ratings, cfg.gemini_weight)
@@ -51,21 +51,23 @@ def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | No
     outputs: dict[str, dict] = {}
     bpm, beats = None, None
     if music and beat_sync:
-        bpm, beats = track_beats(music)
+        bpm, beats = track_beats(music, cfg.music)
         log(f"Music: {bpm:.1f} BPM, {len(beats)} beats")
 
     reel = select(reel_c, cfg.reel)
     if beats is not None:
         reel = snap_to_beats(reel, beats, clips, cfg.reel.min_len)
+    if music:
+        _warn_if_music_short("reel", reel, music, log)
     outputs["reel"] = _out_entry(reel, "horizontal", music)
 
-    long = select(long_c, cfg.long, merge_gap=3.0)
+    long = select(long_c, cfg.long, merge_gap=cfg.long_merge_gap)
     outputs["long"] = _out_entry(long, "horizontal", None)
 
     used: list[Segment] = []
     for k in range(cfg.shorts_count):
         segs = select(short_c, cfg.short, exclude=used)
-        if sum(s.duration for s in segs) < cfg.short.target * 0.5:
+        if sum(s.duration for s in segs) < cfg.short.target * cfg.short_min_fill:
             break
         if beats is not None:
             segs = snap_to_beats(segs, beats, clips, cfg.short.min_len)
@@ -87,6 +89,23 @@ def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | No
     dump_json(out_dir / "plan.json", plan)
     (out_dir / "report.md").write_text(report_md(plan), encoding="utf-8")
     return plan
+
+
+def music_duration(path: str) -> float | None:
+    """Length of an audio file in seconds, or None if ffprobe cannot tell."""
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
+                              "default=nw=1:nk=1", path], capture_output=True, check=True).stdout
+        return float(out.decode().strip())
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return None
+
+
+def _warn_if_music_short(name: str, segs: list[Segment], music: str, log) -> None:
+    total = sum(s.duration for s in segs)
+    mlen = music_duration(music)
+    if mlen is not None and mlen < total - 0.05:
+        log(f"  ! {name}: music is {mlen:.0f} s but the video is {total:.0f} s; the rest will be silent")
 
 
 def _out_entry(segs: list[Segment], orientation: str, music: str | None) -> dict:

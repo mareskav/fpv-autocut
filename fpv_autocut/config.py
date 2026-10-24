@@ -16,6 +16,9 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 
 
+ORDERS = ("chrono", "score", "hook")
+
+
 @dataclass
 class Weights:
     """How much each signal contributes to the per-bin highlight score.
@@ -44,6 +47,7 @@ class Detect:
     smooth_bins: int = 3               # moving-average window on the final score
     analysis_fps: float = 10.0         # frames per second decoded for visual signals
     analysis_width: int = 160          # width of the decoded analysis frames
+    audio_sr: int = 8000               # sample rate the audio is decoded at for loudness
 
 
 @dataclass
@@ -56,7 +60,9 @@ class Profile:
     grow_rel: float             # grow a segment while score >= peak * grow_rel
     floor: float                # never use segments whose peak score is below this
     pad: float = 0.25           # extra seconds on both sides
-    order: str = "chrono"       # "chrono" or "score" or "hook" (best first, rest chrono)
+    overlap_tol: float = 1.0    # candidates overlapping an already chosen segment by less than this are kept (trimmed)
+    min_keep: float = 0.2       # segments shorter than this after trimming are dropped
+    order: str = "chrono"       # one of ORDERS; "hook" = best first, rest chronological
 
 
 @dataclass
@@ -70,6 +76,16 @@ class Output:
     preset: str = "veryfast"
     music_fade_s: float = 2.0
     source_audio_under_music: float = 0.0  # 0 = music only, 0.15 = quiet motors underneath
+    edge_fade_s: float = 0.02      # audio fade in/out on every segment, hides clicks at cuts
+    source_margin_s: float = 0.5   # extra source read past a segment, so the encoder never starves
+    tail_pad_s: float = 1.0        # freeze-frame padding if the source ends before the segment does
+
+
+@dataclass
+class Music:
+    bpm_min: float = 70.0       # tempo search range of the beat tracker
+    bpm_max: float = 180.0
+    bpm_prior: float = 120.0    # tempi near this are preferred, to avoid half/double-time picks
 
 
 @dataclass
@@ -86,14 +102,25 @@ class Config:
         default_factory=lambda: Profile(target=30, min_len=1.5, max_len=5.0, grow_rel=0.70, floor=0.50, order="hook")
     )
     shorts_count: int = 2
+    short_min_fill: float = 0.5   # a short is dropped if it fills less than this share of its target
+    long_merge_gap: float = 3.0   # long version: merge segments of one clip closer than this (s)
+    music: Music = field(default_factory=Music)
     horizontal: Output = field(default_factory=Output)
     vertical: Output = field(default_factory=lambda: Output(width=1080, height=1920))
     prefer_stabilized: bool = True
     gemini_model: str = "gemini-flash-latest"
     gemini_weight: float = 0.4  # share of Gemini's rating in the final segment score
+    gemini_max_candidates: int = 60  # cost cap: only the strongest moments are sent
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def validate(self) -> "Config":
+        for name in ("reel", "long", "short"):
+            order = getattr(self, name).order
+            if order not in ORDERS:
+                raise ValueError(f"Config key '{name}.order' must be one of {', '.join(ORDERS)}; got '{order}'")
+        return self
 
 
 def _apply(obj, data: dict, where: str) -> None:
@@ -117,10 +144,10 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
             _apply(cfg, tomllib.load(fh), "")
     if overrides:
         _apply(cfg, overrides, "")
-    return cfg
+    return cfg.validate()
 
 
 def config_from_dict(data: dict) -> Config:
     cfg = Config()
     _apply(cfg, data, "")
-    return cfg
+    return cfg.validate()

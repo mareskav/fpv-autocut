@@ -57,9 +57,23 @@ def _overrides(a: argparse.Namespace) -> dict:
     return o
 
 
+def check_out_dir(out: Path, inputs: list[str]) -> None:
+    """Refuse an output folder that is (or sits inside) the footage folder: footage is read-only."""
+    out_r = out.resolve()
+    for item in inputs:
+        p = Path(item).resolve()
+        folder = p if p.is_dir() else p.parent
+        if out_r == folder or folder in out_r.parents:
+            raise SystemExit(
+                f"error: output folder {out} is inside the footage folder {folder}. "
+                "Pick another -o folder: the footage folder is never written to."
+            )
+
+
 def _plan(a: argparse.Namespace) -> Path:
     cfg = load_config(a.config, _overrides(a))
     out = Path(a.out)
+    check_out_dir(out, a.inputs)
     out.mkdir(parents=True, exist_ok=True)
     clips = discover(a.inputs, prefer_stabilized=cfg.prefer_stabilized, log=_log)
     if not clips:

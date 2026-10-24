@@ -110,7 +110,7 @@ def _merge_close(segs: list[Segment], gap: float) -> list[Segment]:
     return merged
 
 
-def _resolve_overlaps(segs: list[Segment]) -> list[Segment]:
+def _resolve_overlaps(segs: list[Segment], min_keep: float = 0.2) -> list[Segment]:
     """Make same-clip segments disjoint so no footage is shown twice."""
     segs = sorted(segs, key=lambda s: (s.clip, s.start))
     out: list[Segment] = []
@@ -119,7 +119,7 @@ def _resolve_overlaps(segs: list[Segment]) -> list[Segment]:
             mid = (out[-1].end + s.start) / 2
             out[-1].end = mid
             s.start = mid
-        if s.duration > 0.2:
+        if s.duration > min_keep:
             out.append(s)
     return out
 
@@ -138,8 +138,8 @@ def select(cands: list[Segment], prof: Profile, *, exclude: list[Segment] | None
            merge_gap: float = 0.0) -> list[Segment]:
     """Pick the best segments until their total length reaches ``prof.target``."""
     # Padding makes neighbouring segments overlap slightly; only real overlaps
-    # (more than a second) block a candidate. Small ones are trimmed below.
-    tol = 1.0
+    # (more than ``overlap_tol``) block a candidate. Small ones are trimmed below.
+    tol = prof.overlap_tol
 
     def overlaps(a: Segment, b: Segment) -> bool:
         return a.clip == b.clip and a.start < b.end - tol and b.start < a.end - tol
@@ -156,7 +156,7 @@ def select(cands: list[Segment], prof: Profile, *, exclude: list[Segment] | None
         total += s.duration
     if merge_gap > 0:
         chosen = _merge_close(chosen, merge_gap)
-    chosen = _resolve_overlaps(chosen)
+    chosen = _resolve_overlaps(chosen, prof.min_keep)
     # Trim the overshoot from the weakest segment(s) so the total lands near the target.
     over = sum(s.duration for s in chosen) - prof.target
     for s in sorted(chosen, key=lambda s: s.score):
@@ -174,16 +174,32 @@ def select(cands: list[Segment], prof: Profile, *, exclude: list[Segment] | None
     return order_segments(chosen, prof.order)
 
 
+def _free_space(s: Segment, others: list[Segment], clip_dur: float) -> tuple[float, float]:
+    """Source-time interval around ``s`` not taken by other segments of the same clip."""
+    lo, hi = 0.0, clip_dur
+    for o in others:
+        if o.clip != s.clip:
+            continue
+        if o.end <= s.start + 1e-9:
+            lo = max(lo, o.end)
+        elif o.start >= s.end - 1e-9:
+            hi = min(hi, o.start)
+    return lo, hi
+
+
 def snap_to_beats(segs: list[Segment], beats: np.ndarray, clips: list[Clip], min_len: float) -> list[Segment]:
     """Adjust segment lengths so every cut lands on a music beat."""
     if beats is None or len(beats) < 2:
         return segs
     out: list[Segment] = []
     cur = 0.0
-    for s in segs:
+    for i, s in enumerate(segs):
         s = Segment(**asdict(s))
         target_end = cur + s.duration
-        cands = beats[beats >= cur + min_len * 0.75]
+        # Growing must never run into another segment of the same clip (the same shot twice),
+        # so only beats reachable inside the free space around this segment are candidates.
+        lo, hi = _free_space(s, out + segs[i + 1:], clips[s.clip].duration)
+        cands = beats[(beats >= cur + min_len * 0.75) & (beats <= cur + (hi - lo))]
         if cands.size == 0:
             out.append(s)
             cur += s.duration
@@ -199,9 +215,9 @@ def snap_to_beats(segs: list[Segment], beats: np.ndarray, clips: list[Clip], min
             else:
                 s.end += delta
         else:
-            grow_end = min(delta, clip_dur - s.end)
+            grow_end = min(delta, hi - s.end)
             s.end += grow_end
-            s.start = max(0.0, s.start - (delta - grow_end))
+            s.start = max(lo, s.start - (delta - grow_end))
         cur += s.duration
         out.append(s)
     return out

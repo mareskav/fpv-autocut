@@ -18,6 +18,10 @@ from pathlib import Path
 from .media import Clip
 from .planning import Segment
 
+PROXY_HEIGHT = 360         # proxy sent to Gemini: small and cheap
+PROXY_FPS = 5
+UPLOAD_TIMEOUT_S = 300.0   # give up on a file that stays in PROCESSING
+
 PROMPT = """You are a senior FPV drone video editor choosing shots for a highlight reel.
 The attached video is a low-resolution proxy of one FPV flight (no audio).
 Rate each candidate time range below for how much it belongs in a highlight reel.
@@ -39,16 +43,50 @@ def _mmss(t: float) -> str:
     return f"{int(t // 60):02d}:{t % 60:04.1f}"
 
 
+def proxy_name(clip: Clip) -> str:
+    """Proxy file name, unique per source path (two flights may both be called GX010001)."""
+    return f"{clip.name}-{hashlib.sha1(clip.path.encode()).hexdigest()[:8]}-proxy.mp4"
+
+
 def _proxy(clip: Clip, dst: Path) -> Path:
     if dst.exists():
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.stem + ".part.mp4")  # never leave a half-written proxy under the final name
     subprocess.run(
         ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", clip.path, "-an",
-         "-vf", "scale=-2:360,fps=5", "-c:v", "libx264", "-preset", "veryfast", "-crf", "32", str(dst)],
+         "-vf", f"scale=-2:{PROXY_HEIGHT},fps={PROXY_FPS}", "-c:v", "libx264", "-preset", "veryfast",
+         "-crf", "32", str(tmp)],
         check=True, capture_output=True,
     )
+    tmp.replace(dst)
     return dst
+
+
+def wait_until_active(client, f, timeout: float, poll: float = 2.0):
+    """Poll an uploaded file until Gemini has processed it; None on FAILED or timeout."""
+    deadline = time.monotonic() + timeout
+    while True:
+        state = getattr(f.state, "name", str(f.state))
+        if state == "ACTIVE":
+            return f
+        if state == "FAILED" or time.monotonic() > deadline:
+            return None
+        time.sleep(poll)
+        f = client.files.get(name=f.name)
+
+
+def parse_ratings(text: str | None) -> list[dict] | None:
+    """The model's JSON answer as a list of dicts, or None if it is unusable."""
+    try:
+        data = json.loads(text or "")
+    except (TypeError, ValueError):
+        return None
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return None
+    return [d for d in data if isinstance(d, dict)]
 
 
 def rate_segments(segments: list[Segment], clips: list[Clip], work: Path, model: str,
@@ -78,17 +116,21 @@ def rate_segments(segments: list[Segment], clips: list[Clip], work: Path, model:
             rated = json.loads(cache.read_text(encoding="utf-8"))
         else:
             log(f"  gemini: rating {len(segs)} moments in {clip.name}")
-            proxy = _proxy(clip, gdir / f"{clip.name}-proxy.mp4")
+            proxy = _proxy(clip, gdir / proxy_name(clip))
             f = client.files.upload(file=str(proxy))
-            while getattr(f.state, "name", str(f.state)) == "PROCESSING":
-                time.sleep(2)
-                f = client.files.get(name=f.name)
+            f = wait_until_active(client, f, timeout=UPLOAD_TIMEOUT_S)
+            if f is None:
+                log(f"  ! gemini: upload of {clip.name} did not become ready, skipped")
+                continue
             resp = client.models.generate_content(
                 model=model,
                 contents=[f, PROMPT.format(candidates=lines)],
                 config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
             )
-            rated = json.loads(resp.text)
+            rated = parse_ratings(resp.text)
+            if rated is None:
+                log(f"  ! gemini: unusable answer for {clip.name}, skipped")
+                continue
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(json.dumps(rated, indent=2, ensure_ascii=False), encoding="utf-8")
             try:
