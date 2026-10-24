@@ -95,12 +95,20 @@ def _find_sibling(p: Path, stem: str, exts: list[str]) -> Path | None:
     return None
 
 
-def discover(inputs: list[str], prefer_stabilized: bool = True) -> list[Clip]:
+def _probe_error(exc: Exception) -> str:
+    if isinstance(exc, subprocess.CalledProcessError):
+        err = (exc.stderr or b"").decode(errors="replace").strip()
+        return err.splitlines()[-1] if err else f"ffprobe exited with {exc.returncode}"
+    return str(exc) or type(exc).__name__
+
+
+def discover(inputs: list[str], prefer_stabilized: bool = True, log=print) -> list[Clip]:
     """Collect source clips from files/directories.
 
     * ``foo.mp4`` + ``foo.gcsv`` -> gyro log paired.
     * ``foo_stabilized.mp4`` (Gyroflow output) is used for rendering ``foo.mp4``
       when ``prefer_stabilized`` is on; it is never analysed as its own clip.
+    * Unreadable or truncated files (e.g. after a crash) are skipped with a warning.
     """
     files: list[Path] = []
     for item in inputs:
@@ -124,7 +132,13 @@ def discover(inputs: list[str], prefer_stabilized: bool = True) -> list[Clip]:
         if f in seen:
             continue
         seen.add(f)
-        meta = probe(f)
+        try:
+            meta = probe(f)
+            if meta["duration"] <= 0:
+                raise ValueError("zero duration")
+        except (subprocess.CalledProcessError, ValueError, KeyError, ZeroDivisionError, OSError) as exc:
+            log(f"  ! skipping {f.name}: {_probe_error(exc)}")
+            continue
         gyro = _find_sibling(f, f.stem, [".gcsv"])
         render = f
         if prefer_stabilized and not _is_stabilized(f):

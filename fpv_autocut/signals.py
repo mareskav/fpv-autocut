@@ -22,6 +22,7 @@ from .config import Config
 from .gyro import gyro_features, read_gcsv
 from .media import Clip
 
+CACHE_VERSION = "1"  # bump when signal computation changes, to invalidate old caches
 SIGNAL_KEYS = ("motion", "sharp", "luma", "audio_db", "gyro_mean", "gyro_peak", "flip_deg")
 
 
@@ -108,8 +109,31 @@ def _cache_key(clip: Clip, cfg: Config, gyro_offset: float) -> str:
     if clip.gyro_path:
         parts += [clip.gyro_path, str(os.path.getmtime(clip.gyro_path))]
     d = cfg.detect
+    parts += [CACHE_VERSION]
     parts += [str(x) for x in (d.analysis_fps, d.analysis_width, d.gyro_lowpass_hz, d.flip_window_s, gyro_offset, BIN)]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _load_cache(path: Path) -> dict[str, np.ndarray] | None:
+    """Cached signals, or None if the file is corrupt or incomplete."""
+    try:
+        with np.load(path) as z:
+            sig = {k: z[k] for k in z.files}
+    except Exception:  # truncated zip, bad pickle header, I/O error...
+        return None
+    if any(k not in sig for k in SIGNAL_KEYS):
+        return None
+    return sig
+
+
+def _save_cache(path: Path, sig: dict[str, np.ndarray]) -> None:
+    """Atomic write: an interrupted run never leaves a half-written .npz."""
+    tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp.npz")
+    try:
+        np.savez_compressed(tmp, **sig)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def analyze_clip(clip: Clip, cfg: Config, cache_dir: Path, *, gyro_offset: float = 0.0,
@@ -118,8 +142,11 @@ def analyze_clip(clip: Clip, cfg: Config, cache_dir: Path, *, gyro_offset: float
     key = _cache_key(clip, cfg, gyro_offset)
     cache = cache_dir / f"{clip.name}-{key}.npz"
     if cache.exists():
-        with np.load(cache) as z:
-            return {k: z[k] for k in z.files}
+        cached = _load_cache(cache)
+        if cached is not None:
+            return cached
+        log(f"  ! discarding unreadable cache {cache.name}")
+        cache.unlink(missing_ok=True)
 
     log(f"  analysing {Path(clip.path).name} ({clip.duration:.0f} s)")
     sig = visual_signals(clip, cfg, hwaccel=hwaccel)
@@ -141,7 +168,7 @@ def analyze_clip(clip: Clip, cfg: Config, cache_dir: Path, *, gyro_offset: float
             m = min(n_bins, len(sig[k]))
             arr[:m] = sig[k][:m]
             sig[k] = arr
-    np.savez_compressed(cache, **sig)
+    _save_cache(cache, sig)
     return sig
 
 

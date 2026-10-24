@@ -32,8 +32,9 @@ Requires Python ≥ 3.11 and ffmpeg on `PATH`.
 winget install Gyan.FFmpeg          # Windows; macOS: brew install ffmpeg
 git clone https://github.com/mareskav/fpv-autocut
 cd fpv-autocut
-pip install -e .                    # core: numpy only, works on Windows ARM64
-pip install -e ".[gemini]"          # optional: Gemini scoring
+uv sync                             # core: numpy only, works on Windows ARM64
+uv sync --extra gemini              # optional: Gemini scoring
+uv run fpv-autocut --help           # or activate .venv and call fpv-autocut directly
 ```
 
 ## Use
@@ -105,9 +106,9 @@ plan, looks at the contact sheets, adjusts the plan and renders.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest              # unit tests + end-to-end test on synthetic footage
-python tests/synth.py demo/   # synthetic flight with known flip / fast pass
+uv sync                      # installs the dev group (pytest) too
+uv run pytest              # unit tests + end-to-end test on synthetic footage
+uv run python tests/synth.py demo/   # synthetic flight with known flip / fast pass
 ```
 
 ## License

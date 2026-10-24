@@ -7,12 +7,12 @@ score → segments → `plan.json` → ffmpeg renders (16:9 reel, 16:9 long, 9:1
 ## Commands
 
 ```bash
-pip install -e ".[dev]"            # once
-pytest                             # must pass before committing (~40 s, needs ffmpeg)
-fpv-autocut plan FOLDER -o OUT --sheets [--music song.mp3] [--gemini]
-fpv-autocut render OUT/plan.json [--only reel,short_01] [--draft]
-fpv-autocut run FOLDER -o OUT [...]      # plan + render
-python tests/synth.py DIR                # synthetic flight with known events
+uv sync                           # once (creates .venv, installs dev group)
+uv run pytest                             # must pass before committing (~40 s, needs ffmpeg)
+uv run fpv-autocut plan FOLDER -o OUT --sheets [--music song.mp3] [--gemini]
+uv run fpv-autocut render OUT/plan.json [--only reel,short_01] [--draft]
+uv run fpv-autocut run FOLDER -o OUT [...]      # plan + render
+uv run python tests/synth.py DIR                # synthetic flight with known events
 ```
 
 ## Layout

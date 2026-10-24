@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -60,9 +61,9 @@ def _plan(a: argparse.Namespace) -> Path:
     cfg = load_config(a.config, _overrides(a))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    clips = discover(a.inputs, prefer_stabilized=cfg.prefer_stabilized)
+    clips = discover(a.inputs, prefer_stabilized=cfg.prefer_stabilized, log=_log)
     if not clips:
-        raise SystemExit("No video files found.")
+        raise SystemExit("No usable video files found.")
     for c in clips:
         stab = " (render: stabilized)" if c.render_path != c.path else ""
         gyro = "gyro" if c.gyro_path else "NO gyro"
@@ -122,6 +123,12 @@ def main(argv: list[str] | None = None) -> int:
     except ToolMissing as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except FileNotFoundError as exc:
+        print(f"error: not found: {exc}", file=sys.stderr)
+        return 2
+    except (subprocess.CalledProcessError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         return 130
     print(f"Done in {time.time() - t0:.1f} s")
