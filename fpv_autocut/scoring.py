@@ -42,7 +42,7 @@ def score_session(signals: list[dict[str, np.ndarray]], cfg: Config) -> tuple[li
     """Return (scores per clip, per-clip debug info with idle/flip masks)."""
     d, w = cfg.detect, cfg.weights
     lengths = [len(s["motion"]) for s in signals]
-    cat = {k: np.concatenate([s[k] for s in signals]) for k in signals[0]}
+    cat = {k: np.concatenate([s[k] for s in signals]) for k in signals[0] if k != "sync"}   # "sync" is clip metadata, not a per-bin signal
 
     luma = cat["luma"]
     usable = np.isfinite(luma) & (luma > d.dark_luma) & (luma < d.blown_luma)

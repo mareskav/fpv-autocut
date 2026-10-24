@@ -37,7 +37,10 @@ def _common_plan_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--short-len", type=float, help="length of each short in seconds (default 30)")
     p.add_argument("--gemini", action="store_true", help="let Gemini rate candidate moments (needs GEMINI_API_KEY)")
     p.add_argument("--no-stabilized", action="store_true", help="ignore *_stabilized.mp4 Gyroflow renders")
-    p.add_argument("--gyro-offset", type=float, default=0.0, help="seconds to shift gyro data vs video")
+    p.add_argument("--gyro-offset", type=float, default=0.0,
+                   help="seconds to shift gyro data vs video (centre of the auto-sync search)")
+    p.add_argument("--no-gyro-sync", action="store_true",
+                   help="do not auto-align gyro to video; use --gyro-offset as is")
     p.add_argument("--hwaccel", help="ffmpeg -hwaccel for analysis decoding, e.g. auto, d3d11va, cuda")
     p.add_argument("-j", "--jobs", type=int, default=2, help="parallel ffmpeg jobs (default 2)")
 
@@ -54,6 +57,8 @@ def _overrides(a: argparse.Namespace) -> dict:
         o["shorts_count"] = a.shorts
     if a.no_stabilized:
         o["prefer_stabilized"] = False
+    if a.no_gyro_sync:
+        o["detect"] = {"gyro_sync": False}
     return o
 
 

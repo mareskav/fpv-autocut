@@ -93,8 +93,18 @@ def gyro_series(rate_hz: int = 500, seed: int = 0) -> tuple[np.ndarray, np.ndarr
     return t, g
 
 
-def make_gcsv(dst: Path, rate_hz: int = 500) -> Path:
+def make_gcsv(dst: Path, rate_hz: int = 500, shift_s: float = 0.0) -> Path:
+    """Gyro log for the synthetic flight. ``shift_s`` > 0: the log starts that long after the video does
+    (so the correct sync offset is +shift_s); < 0: it starts earlier."""
     t, g = gyro_series(rate_hz)
+    if shift_s >= 0:
+        t = t - shift_s
+        keep = t >= 0
+        t, g = t[keep], g[keep]
+    else:   # log starts before the video: the extra lead-in is the camera sitting still
+        lead = np.arange(0, -shift_s, 1 / rate_hz)
+        t = np.concatenate([lead, t - shift_s])
+        g = np.vstack([np.zeros((len(lead), 3)), g])
     gscale = 0.001  # raw units -> rad/s
     raw = np.round(np.radians(g) / gscale).astype(int)
     tt = np.round(t * 1000).astype(int)

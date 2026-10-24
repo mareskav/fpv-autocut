@@ -22,6 +22,7 @@ from . import BIN
 from .config import Config
 from .gyro import gyro_features, read_gcsv
 from .media import Clip
+from .sync import estimate_offset, gyro_rate_series
 
 CACHE_VERSION = "1"  # bump when signal computation changes, to invalidate old caches
 SIGNAL_KEYS = ("motion", "sharp", "luma", "audio_db", "gyro_mean", "gyro_peak", "flip_deg")
@@ -81,6 +82,7 @@ def visual_signals(clip: Clip, cfg: Config, hwaccel: str | None = None) -> dict[
     n_bins = max(1, math.ceil(clip.duration / BIN))
     times = np.arange(len(luma)) / d.analysis_fps
     return {
+        "motion_raw": np.array(motion),     # per analysis frame; used for gyro sync, not cached
         "motion": _bin_mean(np.array(motion), times, n_bins),
         "sharp": _bin_mean(np.array(sharp), times, n_bins),
         "luma": _bin_mean(np.array(luma), times, n_bins),
@@ -126,7 +128,8 @@ def _cache_key(clip: Clip, cfg: Config, gyro_offset: float) -> str:
         parts += [clip.gyro_path, str(os.path.getmtime(clip.gyro_path))]
     d = cfg.detect
     parts += [CACHE_VERSION]
-    parts += [str(x) for x in (d.analysis_fps, d.analysis_width, d.audio_sr, d.gyro_lowpass_hz, d.flip_window_s, gyro_offset, BIN)]
+    parts += [str(x) for x in (d.analysis_fps, d.analysis_width, d.audio_sr, d.gyro_lowpass_hz, d.flip_window_s,
+                               gyro_offset, d.gyro_sync, d.sync_max_shift_s, d.sync_min_corr, BIN)]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
@@ -166,12 +169,24 @@ def analyze_clip(clip: Clip, cfg: Config, cache_dir: Path, *, gyro_offset: float
 
     log(f"  analysing {Path(clip.path).name} ({clip.duration:.0f} s)")
     sig = visual_signals(clip, cfg, hwaccel=hwaccel)
+    motion_raw = sig.pop("motion_raw")
     sig["audio_db"] = audio_signal(clip, cfg)
     n_bins = len(sig["motion"])
     if clip.gyro_path:
         try:
             log_ = read_gcsv(clip.gyro_path)
-            g = gyro_features(log_, clip.duration, offset=gyro_offset,
+            offset = gyro_offset
+            if cfg.detect.gyro_sync:
+                res = estimate_offset(gyro_rate_series(log_, cfg.detect.analysis_fps, cfg.detect.gyro_lowpass_hz),
+                                      motion_raw, cfg.detect.analysis_fps, center=gyro_offset,
+                                      max_shift_s=cfg.detect.sync_max_shift_s, min_corr=cfg.detect.sync_min_corr)
+                offset = res.offset
+                sig["sync"] = np.array([res.offset, res.corr, float(res.accepted)])
+                if res.accepted:
+                    log(f"  gyro sync {clip.name}: {res.offset:+.2f} s (corr {res.corr:.2f})")
+                else:
+                    log(f"  ! gyro sync {clip.name}: no confident match (corr {res.corr:.2f}), using {offset:+.2f} s")
+            g = gyro_features(log_, clip.duration, offset=offset,
                               lowpass_hz=cfg.detect.gyro_lowpass_hz, flip_window_s=cfg.detect.flip_window_s)
             sig.update(g)
         except (ValueError, OSError) as exc:

@@ -52,7 +52,7 @@ fpv-autocut render D:\FPV\edit\plan.json --only reel,short_01
 ```
 
 Useful options: `--reel 150`, `--long 600`, `--shorts 3`, `--short-len 20`,
-`--gemini`, `--config my.toml`, `--gyro-offset 0.2`, `--hwaccel auto`, `-j 4`.
+`--gemini`, `--config my.toml`, `--gyro-offset 0.2`, `--no-gyro-sync`, `--hwaccel auto`, `-j 4`.
 
 Analysis is cached in `OUT/cache/`, so re-planning with different settings
 takes seconds.

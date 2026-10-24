@@ -48,6 +48,9 @@ class Detect:
     analysis_fps: float = 10.0         # frames per second decoded for visual signals
     analysis_width: int = 160          # width of the decoded analysis frames
     audio_sr: int = 8000               # sample rate the audio is decoded at for loudness
+    gyro_sync: bool = True             # align each clip's gyro log to its video by cross-correlation
+    sync_max_shift_s: float = 5.0      # search +- this many seconds around --gyro-offset
+    sync_min_corr: float = 0.3         # weaker matches are ignored and --gyro-offset is used as is
 
 
 @dataclass
