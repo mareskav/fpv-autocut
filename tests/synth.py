@@ -55,7 +55,7 @@ def make_video(dst: Path, with_audio: bool = True) -> Path:
              "-crf", "23", str(part)])
         parts.append(part)
     listing = tmp / "list.txt"
-    listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts))
+    listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
     video_only = tmp / "video.mp4"
     _ff(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(video_only)])
     if with_audio:

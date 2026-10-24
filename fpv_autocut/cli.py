@@ -67,6 +67,8 @@ def check_out_dir(out: Path, inputs: list[str]) -> None:
     out_r = out.resolve()
     for item in inputs:
         p = Path(item).resolve()
+        if not p.exists():
+            continue                      # discover() reports a missing input
         folder = p if p.is_dir() else p.parent
         if out_r == folder or folder in out_r.parents:
             raise SystemExit(
@@ -144,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except FileNotFoundError as exc:
         print(f"error: not found: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:   # bad config file / unknown key / malformed plan.json
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     except (subprocess.CalledProcessError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
