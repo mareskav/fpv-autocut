@@ -14,7 +14,6 @@ Run directly to write files into a folder:  python tests/synth.py OUTDIR
 
 from __future__ import annotations
 
-import math
 import subprocess
 import sys
 from pathlib import Path

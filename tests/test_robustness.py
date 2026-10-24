@@ -5,14 +5,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from synth import make_video
 
 from fpv_autocut import signals
 from fpv_autocut.cli import main
 from fpv_autocut.config import load_config
-from fpv_autocut.media import Clip, discover, probe
+from fpv_autocut.media import Clip, discover
 from fpv_autocut.signals import SIGNAL_KEYS, _load_cache, _save_cache, analyze_clip
-
-from synth import make_video
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 
@@ -112,6 +111,7 @@ def test_gemini_parse_ratings():
 
 def test_gemini_wait_until_active(monkeypatch):
     from types import SimpleNamespace as NS
+
     from fpv_autocut import gemini
     monkeypatch.setattr(gemini.time, "sleep", lambda s: None)
 

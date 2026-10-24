@@ -37,7 +37,7 @@ class Segment:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Segment":
+    def from_dict(cls, d: dict) -> Segment:
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
@@ -222,7 +222,6 @@ def snap_to_beats(segs: list[Segment], beats: np.ndarray, clips: list[Clip], min
             continue
         nb = float(cands[np.argmin(np.abs(cands - target_end))])
         new_dur = nb - cur
-        clip_dur = clips[s.clip].duration
         delta = new_dur - s.duration
         if delta < 0:
             # Shorten from the side further from the peak.

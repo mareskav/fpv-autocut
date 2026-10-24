@@ -5,14 +5,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from synth import make_gcsv, make_video
 
 from fpv_autocut.config import load_config
 from fpv_autocut.gyro import GyroLog, read_gcsv
 from fpv_autocut.media import Clip
 from fpv_autocut.signals import analyze_clip
 from fpv_autocut.sync import estimate_offset, gyro_rate_series
-
-from synth import make_gcsv, make_video
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 FPS = 10.0

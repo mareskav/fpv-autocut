@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fpv-autocut"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Automatic highlight selection and editing for FPV drone footage, driven by gyro data."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,7 +15,7 @@ dependencies = ["numpy>=1.26"]
 gemini = ["google-genai>=1.0"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 fpv-autocut = "fpv_autocut.cli:main"
@@ -25,3 +25,14 @@ include = ["fpv_autocut*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.dynamic]
+version = { attr = "fpv_autocut.__version__" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B905", "E501", "E731"]

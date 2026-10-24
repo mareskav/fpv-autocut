@@ -57,7 +57,7 @@ def read_gcsv(path: str | Path) -> GyroLog:
         if needed not in cols:
             raise ValueError(f"{path}: missing column '{needed}'")
 
-    body = "\n".join(l for l in lines[header_idx + 1:] if l.strip())
+    body = "\n".join(ln for ln in lines[header_idx + 1:] if ln.strip())
     if not body:
         raise ValueError(f"{path}: no samples")
     data = np.loadtxt(io.StringIO(body), delimiter=",", ndmin=2, usecols=range(len(cols)))

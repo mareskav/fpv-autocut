@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import subprocess
 from pathlib import Path
 
 from . import BIN, __version__
@@ -21,7 +20,6 @@ from .planning import Segment, auto_crop_x, find_segments, select, snap_to_beats
 from .render import contact_sheet, render_plan_output
 from .scoring import score_session
 from .signals import analyze_all, dump_json, write_timeline_csv
-
 
 
 def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | None = None,

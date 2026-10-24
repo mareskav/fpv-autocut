@@ -5,6 +5,14 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff check .
+
   test:
     strategy:
       fail-fast: false
@@ -18,5 +26,24 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - uses: FedericoCarboni/setup-ffmpeg@v3
+      - run: uv sync --locked
+      - run: uv run pytest -q
+
+  # The author's machine is Windows ARM64, where wheels are the usual trouble spot.
+  # Best effort: the runner is newer and ffmpeg is installed through winget.
+  test-windows-arm:
+    runs-on: windows-11-arm
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: Install ffmpeg
+        shell: pwsh
+        run: |
+          winget install Gyan.FFmpeg --accept-source-agreements --accept-package-agreements --silent
+          $bin = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          Add-Content $env:GITHUB_PATH $bin.DirectoryName
       - run: uv sync --locked
       - run: uv run pytest -q

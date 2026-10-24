@@ -8,6 +8,7 @@ gyro = 0.40        # rotation rate
 flip = 0.25        # flips / rolls / loops
 motion = 0.30      # image change: speed and proximity
 audio = 0.05       # throttle punches
+sharp = 0.05       # image detail, mildly prefers crisp frames
 
 [detect]
 flip_min_deg = 180       # rotation within 1.5 s where the flip bonus starts

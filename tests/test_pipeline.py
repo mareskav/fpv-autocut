@@ -7,11 +7,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from synth import make_music, make_session
 
 from fpv_autocut.beats import track_beats
 from fpv_autocut.cli import main
-
-from synth import make_music, make_session
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 

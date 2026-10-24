@@ -6,10 +6,12 @@ import sys
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
-from types import ModuleType, SimpleNamespace as NS
+from types import ModuleType
+from types import SimpleNamespace as NS
 
 import numpy as np
 import pytest
+from synth import make_session
 
 from fpv_autocut.beats import track_beats
 from fpv_autocut.cli import main
@@ -18,8 +20,6 @@ from fpv_autocut.fcpxml import write_fcpxml
 from fpv_autocut.media import Clip
 from fpv_autocut.planning import Segment
 from fpv_autocut.render import frame_counts
-
-from synth import make_session
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 

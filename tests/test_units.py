@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from synth import DURATION, make_gcsv
 
 from fpv_autocut import BIN
 from fpv_autocut.config import Profile, load_config
@@ -13,8 +14,6 @@ from fpv_autocut.media import Clip
 from fpv_autocut.planning import Segment, find_segments, select, snap_to_beats
 from fpv_autocut.render import frame_counts
 from fpv_autocut.scoring import score_session
-
-from synth import DURATION, make_gcsv
 
 
 def _clip(i=0, dur=DURATION):

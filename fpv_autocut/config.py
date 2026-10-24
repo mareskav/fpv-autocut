@@ -15,7 +15,6 @@ import tomllib
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 
-
 ORDERS = ("chrono", "score", "hook")
 
 
@@ -120,7 +119,7 @@ class Config:
     def to_dict(self) -> dict:
         return asdict(self)
 
-    def validate(self) -> "Config":
+    def validate(self) -> Config:
         for name in ("reel", "long", "short"):
             order = getattr(self, name).order
             if order not in ORDERS:

@@ -1,6 +1,7 @@
 # fpv-autocut
 
 Automatic highlight selection and editing for FPV drone footage.
+**English** · [Česky](README.cs.md)
 
 Point it at a folder of flights. It finds the best moments from **gyro data**
 (flips, rolls, dives, fast passes) plus **image motion**, and renders:
@@ -10,7 +11,7 @@ Point it at a folder of flights. It finds the best moments from **gyro data**
 | `reel.mp4` | 3 min, 16:9 | best ~10–15 % of the session, cuts snapped to the music beat |
 | `long.mp4` | 12 min, 16:9 | relaxed selection, longer continuous runs, original audio |
 | `short_01.mp4`, `short_02.mp4` | 30 s, 9:16 | Instagram / Facebook Reels; strongest moment first |
-| `reel.fcpxml`, `long.fcpxml` | | import into DaVinci Resolve to finish the edit |
+| `*.fcpxml` | | one per output (shorts included, with a reframing transform); import into DaVinci Resolve |
 | `plan.json`, `report.md`, `sheets/*.jpg` | | what was picked and why; edit and re-render |
 
 Built for the **RunCam Thumb Pro**, which writes a Gyroflow `.gcsv` gyro log
@@ -52,7 +53,23 @@ fpv-autocut render D:\FPV\edit\plan.json --only reel,short_01
 ```
 
 Useful options: `--reel 150`, `--long 600`, `--shorts 3`, `--short-len 20`,
-`--gemini`, `--config my.toml`, `--gyro-offset 0.2`, `--no-gyro-sync`, `--hwaccel auto`, `-j 4`.
+`--gemini`, `--config my.toml`, `--hwaccel auto`, `-j 4`.
+
+| Option | Effect |
+|---|---|
+| `--no-beat-sync` | use the music but don't snap cuts to its beats |
+| `--gyro-offset 0.2` | starting guess for the gyro↔video offset (seconds) |
+| `--no-gyro-sync` | trust `--gyro-offset` as is instead of aligning by cross-correlation |
+| `--no-fcpxml` | (`render`) skip the `.fcpxml` files |
+
+Contact sheets (one thumbnail per segment, in order) can also be made on their own:
+
+```powershell
+fpv-autocut sheet D:\FPV\edit\plan.json
+```
+
+Gyro logs are aligned to the video automatically; the result is logged as
+`gyro sync NAME: +x s (corr c)`. Weak matches are ignored.
 
 Analysis is cached in `OUT/cache/`, so re-planning with different settings
 takes seconds.
@@ -67,7 +84,9 @@ file and its `.gcsv`. Stabilise first, then run `fpv-autocut`.
 
 *File → Import → Timeline…* and choose `reel.fcpxml`. Clips link to your
 original (or stabilised) files, so you can grade, add transitions and fine-tune
-cuts at full quality. For 4:3 footage on a 16:9 timeline, set
+cuts at full quality. The music is imported as a connected audio clip under the
+first shot. The shorts' 9:16 reframing is a best-effort transform; check the
+framing in Resolve. For 4:3 footage on a 16:9 timeline, set
 *Project Settings → Image Scaling → Mismatched resolution* to
 *Scale full frame with crop*.
 
@@ -106,8 +125,9 @@ plan, looks at the contact sheets, adjusts the plan and renders.
 ## Development
 
 ```bash
-uv sync                      # installs the dev group (pytest) too
+uv sync                      # installs the dev group (pytest, ruff) too
 uv run pytest              # unit tests + end-to-end test on synthetic footage
+uv run ruff check .        # lint
 uv run python tests/synth.py demo/   # synthetic flight with known flip / fast pass
 ```
 
