@@ -11,7 +11,7 @@ from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 from .config import Output
-from .media import Clip, render_meta
+from .media import Clip, music_duration, render_meta
 from .planning import Segment
 from .render import frame_counts
 
@@ -31,7 +31,24 @@ def _fd(fps: str | float) -> Fraction:
     return 1 / f
 
 
-def write_fcpxml(dst: Path, name: str, segments: list[Segment], clips: list[Clip], out: Output) -> Path:
+def _reframe(seg: Segment, m: dict, out: Output) -> str:
+    """adjust-transform that fills a portrait frame with a landscape clip, centred by ``crop_x``.
+
+    Position is in FCPXML units (percent of frame height). Best effort: check the framing in Resolve.
+    """
+    src_w, src_h = m["width"], m["height"]
+    fit = min(out.width / src_w, out.height / src_h)
+    fill = out.height / src_h
+    scaled_w = src_w * fill
+    if fill <= fit or scaled_w <= out.width:
+        return ""
+    left = min(max(seg.crop_x, 0.0), 1.0) * (scaled_w - out.width)
+    x_px = scaled_w / 2 - left - out.width / 2
+    return f'<adjust-transform position="{x_px / out.height * 100:.3f} 0" scale="{fill / fit:.5f} {fill / fit:.5f}"/>'
+
+
+def write_fcpxml(dst: Path, name: str, segments: list[Segment], clips: list[Clip], out: Output,
+                 music: str | None = None) -> Path:
     used = sorted({s.clip for s in segments})
     seq_fps = Fraction(clips[segments[0].clip].fps) if segments else Fraction(int(out.fps))
     seq_fd = 1 / seq_fps
@@ -59,23 +76,46 @@ def write_fcpxml(dst: Path, name: str, segments: list[Segment], clips: list[Clip
         res.append(
             f'<asset id="a{cid}" name={quoteattr(Path(c.render_path).stem)} start="0s" '
             f'duration="{_t(m["duration"], fd)}" hasVideo="1" '
-            + ('hasAudio="1" audioSources="1" audioChannels="2" ' if m["has_audio"] else 'hasAudio="0" ')
+            + (f'hasAudio="1" audioSources="1" audioChannels="{m.get("audio_channels", 2)}" '
+               if m["has_audio"] else 'hasAudio="0" ')
             + f'format="{formats[(m["width"], m["height"], m["fps"])]}" '
             f'src={quoteattr(uri)}/>'
         )
 
+    mus_len = music_duration(music) if music and segments else None
+    if mus_len:
+        res.append(
+            f'<asset id="m0" name={quoteattr(Path(music).stem)} start="0s" duration="{_t(Fraction(mus_len).limit_denominator(1000), seq_fd)}" '
+            f'hasAudio="1" audioSources="1" audioChannels="2" src={quoteattr(Path(music).resolve().as_uri())}/>'
+        )
+
     spine, offset = [], Fraction(0)
     counts = frame_counts(segments, float(seq_fps))
+    total = sum(counts) * seq_fd
     for i, (s, dur_frames) in enumerate(zip(segments, counts)):
         m = metas[s.clip]
         src_fd = _fd(m["fps"])
         dur = dur_frames * seq_fd
+        start = _t(Fraction(s.start).limit_denominator(100000), src_fd)
         label = f"{i + 1:02d} {clips[s.clip].name} score {s.score:.2f}" + (" flip" if "flip" in s.tags else "")
-        spine.append(
-            f'<asset-clip ref="a{s.clip}" name={quoteattr(label)} offset="{_t(offset, seq_fd)}" '
-            f'start="{_t(Fraction(s.start).limit_denominator(100000), src_fd)}" duration="{_t(dur, seq_fd)}" '
-            f'format="{formats[(m["width"], m["height"], m["fps"])]}" tcFormat="NDF"/>'
-        )
+        head = (f'<asset-clip ref="a{s.clip}" name={quoteattr(label)} offset="{_t(offset, seq_fd)}" '
+                f'start="{start}" duration="{_t(dur, seq_fd)}" '
+                f'format="{formats[(m["width"], m["height"], m["fps"])]}" tcFormat="NDF"')
+        children = []
+        if out.height > out.width:
+            adj = _reframe(s, m, out)
+            if adj:
+                children.append(adj)
+        if i == 0 and mus_len:   # music rides under the first clip, from the start of the timeline
+            mdur = min(total, Fraction(mus_len).limit_denominator(1000))
+            children.append(f'<asset-clip ref="m0" lane="-1" name="music" offset="{start}" start="0s" '
+                            f'duration="{_t(mdur, seq_fd)}"/>')
+        if children:
+            spine.append(head + ">")
+            spine.extend("  " + c for c in children)
+            spine.append("</asset-clip>")
+        else:
+            spine.append(head + "/>")
         offset += dur
 
     xml = "\n".join([

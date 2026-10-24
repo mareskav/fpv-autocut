@@ -16,8 +16,8 @@ from . import BIN, __version__
 from .beats import track_beats
 from .config import Config, config_from_dict
 from .fcpxml import write_fcpxml
-from .media import Clip
-from .planning import Segment, find_segments, select, snap_to_beats
+from .media import Clip, music_duration
+from .planning import Segment, auto_crop_x, find_segments, select, snap_to_beats
 from .render import contact_sheet, render_plan_output
 from .scoring import score_session
 from .signals import analyze_all, dump_json, write_timeline_csv
@@ -71,6 +71,12 @@ def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | No
             break
         if beats is not None:
             segs = snap_to_beats(segs, beats, clips, cfg.short.min_len)
+        if cfg.auto_crop:
+            for s in segs:
+                if not s.note:   # a Gemini rating already chose the crop
+                    c = clips[s.clip]
+                    s.crop_x = auto_crop_x(s, signals[s.clip]["cx"], signals[s.clip]["motion"],
+                                           c.width / c.height, cfg.vertical.width / cfg.vertical.height)
         used += segs
         outputs[f"short_{k + 1:02d}"] = _out_entry(segs, "vertical", music)
 
@@ -89,16 +95,6 @@ def build_plan(clips: list[Clip], cfg: Config, out_dir: Path, *, music: str | No
     dump_json(out_dir / "plan.json", plan)
     (out_dir / "report.md").write_text(report_md(plan), encoding="utf-8")
     return plan
-
-
-def music_duration(path: str) -> float | None:
-    """Length of an audio file in seconds, or None if ffprobe cannot tell."""
-    try:
-        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
-                              "default=nw=1:nk=1", path], capture_output=True, check=True).stdout
-        return float(out.decode().strip())
-    except (subprocess.CalledProcessError, ValueError, OSError):
-        return None
 
 
 def _warn_if_music_short(name: str, segs: list[Segment], music: str, log) -> None:
@@ -172,8 +168,8 @@ def render_plan(plan_path: Path, *, only: list[str] | None = None, draft: bool =
         dst = out_dir / f"{name}{suffix}.mp4"
         written.append(render_plan_output(name, segs, clips, out, dst, music=o.get("music"),
                                           draft=draft, jobs=jobs, log=log))
-        if fcpxml and o["orientation"] == "horizontal":
-            written.append(write_fcpxml(out_dir / f"{name}.fcpxml", name, segs, clips, out))
+        if fcpxml:
+            written.append(write_fcpxml(out_dir / f"{name}.fcpxml", name, segs, clips, out, music=o.get("music")))
         if sheets:
             written.append(contact_sheet(segs, clips, out_dir / "sheets" / f"{name}.jpg"))
     return written

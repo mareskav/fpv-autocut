@@ -31,6 +31,7 @@ class Weights:
     flip: float = 0.25    # flips / rolls / loops detected from integrated gyro
     motion: float = 0.30  # frame-to-frame pixel change: speed + proximity proxy
     audio: float = 0.05   # loudness: throttle punches
+    sharp: float = 0.05   # image detail (Laplacian variance): mildly prefers crisp frames over blur
 
 
 @dataclass
@@ -111,6 +112,7 @@ class Config:
     horizontal: Output = field(default_factory=Output)
     vertical: Output = field(default_factory=lambda: Output(width=1080, height=1920))
     prefer_stabilized: bool = True
+    auto_crop: bool = True   # 9:16 crop follows where the image changes most (Gemini's crop_x wins if present)
     gemini_model: str = "gemini-flash-latest"
     gemini_weight: float = 0.4  # share of Gemini's rating in the final segment score
     gemini_max_candidates: int = 60  # cost cap: only the strongest moments are sent

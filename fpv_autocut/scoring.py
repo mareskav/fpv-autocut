@@ -64,12 +64,13 @@ def score_session(signals: list[dict[str, np.ndarray]], cfg: Config) -> tuple[li
         "gyro": _rank(cat["gyro_peak"], active),
         "motion": _rank(cat["motion"], active),
         "audio": _rank(cat["audio_db"], active),
+        "sharp": _rank(cat["sharp"], active),
     }
     flip = cat["flip_deg"]
     span = max(d.flip_full_deg - d.flip_min_deg, 1e-6)
     parts["flip"] = np.where(np.isfinite(flip), np.clip((flip - d.flip_min_deg) / span, 0, 1), np.nan)
 
-    weights = {"gyro": w.gyro, "flip": w.flip, "motion": w.motion, "audio": w.audio}
+    weights = {"gyro": w.gyro, "flip": w.flip, "motion": w.motion, "audio": w.audio, "sharp": w.sharp}
     num = np.zeros(luma.shape)
     den = np.zeros(luma.shape)
     for name, arr in parts.items():

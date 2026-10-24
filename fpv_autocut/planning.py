@@ -174,6 +174,22 @@ def select(cands: list[Segment], prof: Profile, *, exclude: list[Segment] | None
     return order_segments(chosen, prof.order)
 
 
+def auto_crop_x(seg: Segment, cx: np.ndarray, motion: np.ndarray, src_aspect: float, out_aspect: float) -> float:
+    """``crop_x`` (0 = window at the left edge, 1 = right edge) that centres the crop window on
+    the motion-weighted horizontal centre of image change over the segment."""
+    frac = out_aspect / src_aspect            # crop window width as a share of the source width
+    if frac >= 1.0:
+        return 0.5
+    lo = max(0, int(seg.start / BIN))
+    hi = max(lo + 1, int(np.ceil(seg.end / BIN)))
+    c, m = np.asarray(cx[lo:hi], float), np.asarray(motion[lo:hi], float)
+    w = np.where(np.isfinite(c) & np.isfinite(m), m, 0.0)
+    if w.sum() <= 1e-9:
+        return 0.5
+    centre = float((np.nan_to_num(c) * w).sum() / w.sum())
+    return float(np.clip((centre - frac / 2) / (1 - frac), 0.0, 1.0))
+
+
 def _free_space(s: Segment, others: list[Segment], clip_dur: float) -> tuple[float, float]:
     """Source-time interval around ``s`` not taken by other segments of the same clip."""
     lo, hi = 0.0, clip_dur

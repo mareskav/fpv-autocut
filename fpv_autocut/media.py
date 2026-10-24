@@ -36,6 +36,7 @@ class Clip:
     width: int
     height: int
     has_audio: bool
+    audio_channels: int = 2
 
     @property
     def fps_float(self) -> float:
@@ -61,7 +62,9 @@ def probe(path: str | Path) -> dict:
     video = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
     if video is None:
         raise ValueError(f"{path}: no video stream")
-    audio = any(s.get("codec_type") == "audio" for s in info.get("streams", []))
+    audio_streams = [s for s in info.get("streams", []) if s.get("codec_type") == "audio"]
+    audio = bool(audio_streams)
+    channels = int(audio_streams[0].get("channels") or 2) if audio_streams else 0
     rate = video.get("avg_frame_rate") or video.get("r_frame_rate") or "30/1"
     if rate in ("0/0", "0/1"):
         rate = video.get("r_frame_rate", "30/1")
@@ -80,7 +83,18 @@ def probe(path: str | Path) -> dict:
         "width": width,
         "height": height,
         "has_audio": audio,
+        "audio_channels": channels or 2,
     }
+
+
+def music_duration(path: str) -> float | None:
+    """Length of an audio file in seconds, or None if ffprobe cannot tell."""
+    try:
+        out = run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
+                   "default=nw=1:nk=1", path]).stdout
+        return float(out.decode().strip())
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return None
 
 
 def _is_stabilized(p: Path) -> bool:
@@ -161,5 +175,5 @@ def render_meta(clip: Clip) -> dict:
     """Probe the render file (may differ from the analysed file in size/fps)."""
     if clip.render_path == clip.path:
         return {"width": clip.width, "height": clip.height, "has_audio": clip.has_audio,
-                "duration": clip.duration, "fps": clip.fps}
+                "duration": clip.duration, "fps": clip.fps, "audio_channels": clip.audio_channels}
     return probe(clip.render_path)

@@ -69,6 +69,60 @@ def test_fcpxml_empty_plan_is_valid(tmp_path: Path):
     assert ET.parse(dst).getroot().tag == "fcpxml"
 
 
+def test_fcpxml_audio_channels_from_clip(tmp_path: Path):
+    c = _clip()
+    c.audio_channels = 1
+    root = ET.parse(write_fcpxml(tmp_path / "c.fcpxml", "c", [Segment(0, 1, 3, .5, .5, 2)], [c], Output())).getroot()
+    assert next(root.iter("asset")).get("audioChannels") == "1"
+
+
+@needs_ffmpeg
+def test_fcpxml_music_is_connected_under_first_clip(tmp_path: Path):
+    from synth import make_music
+    music = make_music(tmp_path / "m.mp3", seconds=3)
+    segs = [Segment(0, 5.0, 7.0, .5, .5, 6), Segment(0, 20.0, 22.0, .5, .5, 21)]
+    root = ET.parse(write_fcpxml(tmp_path / "m.fcpxml", "m", segs, [_clip()], Output(fps=60.0),
+                                 music=str(music))).getroot()
+    assert {a.get("id") for a in root.iter("asset")} == {"a0", "m0"}
+    first = next(root.iter("spine"))[0]
+    mus = first.find("asset-clip")
+    assert mus.get("ref") == "m0" and mus.get("lane") == "-1"
+    assert _t(mus.get("offset")) == _t(first.get("start"))     # offset is in the parent's source time
+    assert _t(mus.get("duration")) <= 3 + Fraction(1, 10)      # never longer than the song
+    assert len(list(root.iter("spine"))[0]) == 2               # music is nested, not a spine item
+
+
+def test_fcpxml_vertical_gets_reframe_transform(tmp_path: Path):
+    left = Segment(0, 1, 3, .5, .5, 2, crop_x=0.0)
+    right = Segment(0, 5, 7, .5, .5, 6, crop_x=1.0)
+    root = ET.parse(write_fcpxml(tmp_path / "v.fcpxml", "v", [left, right], [_clip()],
+                                 Output(width=1080, height=1920, fps=60.0))).getroot()
+    pos = [float(t.get("position").split()[0]) for t in root.iter("adjust-transform")]
+    assert len(pos) == 2 and pos[0] > 0 > pos[1]               # left crop shifts the image right, and vice versa
+    assert abs(pos[0] + pos[1]) < 1e-6
+
+
+def test_auto_crop_x_follows_motion():
+    from fpv_autocut.planning import auto_crop_x
+    cx = np.array([0.1] * 4 + [0.9] * 4)
+    motion = np.ones(8)
+    seg = lambda a, b: Segment(0, a * 0.5, b * 0.5, .5, .5, a * 0.5)
+    aspect = (1080 / 1920, 1920 / 1080)
+    assert auto_crop_x(seg(0, 4), cx, motion, aspect[1], aspect[0]) == 0.0
+    assert auto_crop_x(seg(4, 8), cx, motion, aspect[1], aspect[0]) == 1.0
+    assert auto_crop_x(seg(0, 8), np.full(8, 0.5), motion, aspect[1], aspect[0]) == pytest.approx(0.5)
+    assert auto_crop_x(seg(0, 4), cx, np.zeros(8), aspect[1], aspect[0]) == 0.5   # no motion: centred
+    assert auto_crop_x(seg(0, 4), cx, motion, 1.0, 2.0) == 0.5                    # source narrower than output
+
+
+@needs_ffmpeg
+def test_probe_reports_audio_channels(tmp_path: Path):
+    from fpv_autocut.media import music_duration, probe
+    s = make_session(tmp_path / "s")
+    assert probe(s["flight"])["audio_channels"] >= 1
+    assert music_duration(str(s["music"])) == pytest.approx(60, abs=1)
+
+
 # ---- Gemini rating with a fake client ---------------------------------------------------
 
 def _fake_genai(monkeypatch, answers: list[str | None]):

@@ -24,8 +24,8 @@ from .gyro import gyro_features, read_gcsv
 from .media import Clip
 from .sync import estimate_offset, gyro_rate_series
 
-CACHE_VERSION = "1"  # bump when signal computation changes, to invalidate old caches
-SIGNAL_KEYS = ("motion", "sharp", "luma", "audio_db", "gyro_mean", "gyro_peak", "flip_deg")
+CACHE_VERSION = "2"  # bump when signal computation changes, to invalidate old caches
+SIGNAL_KEYS = ("motion", "sharp", "luma", "audio_db", "gyro_mean", "gyro_peak", "flip_deg", "cx")
 
 
 def _bin_mean(values: np.ndarray, times: np.ndarray, n_bins: int) -> np.ndarray:
@@ -56,7 +56,8 @@ def visual_signals(clip: Clip, cfg: Config, hwaccel: str | None = None) -> dict[
         "-f", "rawvideo", "-",
     ]
     frame_size = w * h
-    motion, sharp, luma = [], [], []
+    motion, sharp, luma, cx = [], [], [], []
+    xs = np.arange(w, dtype=np.float32) / max(w - 1, 1)
     prev = None
     # stderr goes to a file, not a pipe: a damaged video can print more than a pipe buffer holds,
     # which would block ffmpeg while we are still waiting on stdout.
@@ -71,7 +72,15 @@ def visual_signals(clip: Clip, cfg: Config, hwaccel: str | None = None) -> dict[
                 luma.append(float(f.mean()))
                 lap = 4 * f[1:-1, 1:-1] - f[:-2, 1:-1] - f[2:, 1:-1] - f[1:-1, :-2] - f[1:-1, 2:]
                 sharp.append(float(lap.var()))
-                motion.append(float(np.abs(f - prev).mean()) if prev is not None else np.nan)
+                if prev is not None:
+                    diff = np.abs(f - prev)
+                    motion.append(float(diff.mean()))
+                    col = diff.sum(axis=0)
+                    tot = float(col.sum())
+                    cx.append(float((col * xs).sum() / tot) if tot > 1e-6 else np.nan)
+                else:
+                    motion.append(np.nan)
+                    cx.append(np.nan)
                 prev = f
             proc.wait()
         errf.seek(0)
@@ -86,6 +95,7 @@ def visual_signals(clip: Clip, cfg: Config, hwaccel: str | None = None) -> dict[
         "motion": _bin_mean(np.array(motion), times, n_bins),
         "sharp": _bin_mean(np.array(sharp), times, n_bins),
         "luma": _bin_mean(np.array(luma), times, n_bins),
+        "cx": _bin_mean(np.array(cx), times, n_bins),    # horizontal centre of image change, 0..1
     }
 
 
